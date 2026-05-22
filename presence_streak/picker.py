@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+import queue
 import re
-import select
 import subprocess
 import sys
 import termios
+import threading
 import time
 import tty
 from pathlib import Path
@@ -68,27 +69,60 @@ def _frame_to_ansi(frame: np.ndarray, width: int = 48) -> str:
     return "\n".join(lines)
 
 
-def _read_available_key() -> str | None:
-    """Non-blocking single keystroke read (must be in raw mode already)."""
-    r, _, _ = select.select([sys.stdin], [], [], 0)
-    if not r:
-        return None
-    ch = sys.stdin.read(1)
-    if ch != "\x1b":
-        return ch
-    # ESC may be a bare press or the start of a CSI sequence (arrow keys etc.).
-    # Give the rest of the sequence a generous 150ms to arrive — terminals can
-    # split the bytes across reads if the kernel buffer flushes mid-sequence.
-    buf = ch
-    deadline = time.time() + 0.15
-    while time.time() < deadline:
-        r2, _, _ = select.select([sys.stdin], [], [], max(0.0, deadline - time.time()))
-        if not r2:
-            break
-        buf += sys.stdin.read(1)
-        if len(buf) >= 3:
-            break
-    return buf
+class _KeyReader:
+    """Background thread that does blocking single-byte reads on stdin and
+    publishes assembled keys to a thread-safe queue. Using a thread avoids
+    select-on-stdin gotchas across different terminals."""
+
+    def __init__(self) -> None:
+        self.byte_q: queue.Queue[str] = queue.Queue()
+        self.keys: queue.Queue[str] = queue.Queue()
+        self._stop = threading.Event()
+        self._reader = threading.Thread(target=self._read_loop, daemon=True)
+        self._parser = threading.Thread(target=self._parse_loop, daemon=True)
+
+    def start(self) -> None:
+        self._reader.start()
+        self._parser.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _read_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                ch = sys.stdin.read(1)
+            except Exception:
+                return
+            if not ch:
+                return
+            self.byte_q.put(ch)
+
+    def _parse_loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                ch = self.byte_q.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if ch != "\x1b":
+                self.keys.put(ch)
+                continue
+            # collect CSI / SS3 sequence — up to 2 more bytes within 150ms
+            buf = ch
+            deadline = time.time() + 0.15
+            while time.time() < deadline and len(buf) < 3:
+                try:
+                    nxt = self.byte_q.get(timeout=max(0.0, deadline - time.time()))
+                except queue.Empty:
+                    break
+                buf += nxt
+            self.keys.put(buf)
+
+    def pop(self) -> str | None:
+        try:
+            return self.keys.get_nowait()
+        except queue.Empty:
+            return None
 
 
 def pick(cameras: list[tuple[int, str]]) -> int | None:
@@ -118,8 +152,11 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
     old = termios.tcgetattr(fd)
     sys.stdout.write("\x1b[?25l\x1b[2J\x1b[H")
     sys.stdout.flush()
+    reader: _KeyReader | None = None
     try:
         tty.setraw(fd)
+        reader = _KeyReader()
+        reader.start()
         pending_open_at = time.time()
         last_render = 0.0
         while True:
@@ -157,17 +194,16 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
                 sys.stdout.flush()
                 last_render = now
 
-            # drain all queued keys this tick
             handled = False
-            while True:
-                key = _read_available_key()
+            while reader is not None:
+                key = reader.pop()
                 if key is None:
                     break
                 handled = True
-                if key in ("\x1b[A", "k"):
+                if key in ("\x1b[A", "\x1bOA", "k"):
                     sel = (sel - 1) % len(cameras)
                     pending_open_at = time.time() + 0.12
-                elif key in ("\x1b[B", "j"):
+                elif key in ("\x1b[B", "\x1bOB", "j"):
                     sel = (sel + 1) % len(cameras)
                     pending_open_at = time.time() + 0.12
                 elif key in ("\r", "\n"):
@@ -177,6 +213,8 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
             if not handled:
                 time.sleep(0.01)
     finally:
+        if reader is not None:
+            reader.stop()
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         if cap is not None:
             cap.release()
