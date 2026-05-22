@@ -10,6 +10,7 @@ def render_frame(
     frame: np.ndarray,
     width: int = 56,
     face_box: tuple[int, int, int, int] | None = None,
+    keypoints: dict | None = None,
 ) -> Text:
     h, w = frame.shape[:2]
     new_w = width
@@ -23,6 +24,17 @@ def render_frame(
         bx1, by1 = max(0, int(x1 * sx)), max(0, int(y1 * sy))
         bx2, by2 = min(new_w - 1, int(x2 * sx)), min(new_h - 1, int(y2 * sy))
         cv2.rectangle(small, (bx1, by1), (bx2, by2), (0, 255, 0), 1)
+
+    if keypoints:
+        sx = new_w / w
+        sy = new_h / h
+        for kp in keypoints.values():
+            if kp.visibility < 0.4:
+                continue
+            x = int(kp.x * sx)
+            y = int(kp.y * sy)
+            if 0 <= x < new_w and 0 <= y < new_h:
+                cv2.circle(small, (x, y), 1, (0, 200, 255), -1)
 
     rgb = cv2.cvtColor(small, cv2.COLOR_BGR2RGB)
     text = Text()

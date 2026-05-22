@@ -15,10 +15,11 @@ from rich.table import Table
 from rich.text import Text
 
 from . import store
-from .detector import Camera, FaceDetector
+from .detector import Camera
 from .format import fmt_compact, fmt_duration
 from .picker import choose_camera
 from .thumbnail import render_frame
+from .vision import Vision
 
 GRACE_SECONDS = float(os.environ.get("PRESENCE_GRACE_SECONDS", "10"))
 SAMPLE_MS = int(os.environ.get("PRESENCE_SAMPLE_MS", "100"))  # 10fps capture+detect
@@ -37,6 +38,9 @@ class Tracker:
         self._lock = threading.Lock()
         self.latest_frame = None
         self.latest_box: tuple[int, int, int, int] | None = None
+        self.latest_keypoints: dict = {}
+        self.face_detected = False
+        self.pose_detected = False
         self.last_save = 0.0
 
     def end_streak(self, end_time: float) -> None:
@@ -50,7 +54,7 @@ class Tracker:
     def detector_loop(self) -> None:
         try:
             cam = Camera(self.camera_index)
-            det = FaceDetector(min_confidence=MIN_CONF)
+            vision = Vision(face_min_conf=MIN_CONF)
         except Exception as e:
             self.running = False
             print(f"detector error: {e}", file=sys.stderr)
@@ -60,20 +64,24 @@ class Tracker:
             while self.running:
                 frame = cam.read()
                 now = time.time()
-                has_face, box = (False, None)
-                if frame is not None:
-                    has_face, box = det.detect(frame)
+                result = vision.analyze(frame) if frame is not None else None
                 with self._lock:
                     self.latest_frame = frame
-                    self.latest_box = box
-                    if has_face:
+                    if result is not None:
+                        self.latest_box = result.face_box
+                        self.latest_keypoints = result.keypoints
+                        self.face_detected = result.face_detected
+                        self.pose_detected = result.pose_detected
+                        is_present = result.present
+                    else:
+                        is_present = False
+                    if is_present:
                         if not self.streak_start:
                             self.streak_start = now
                         self.last_present = now
                         self.present = True
                         self.state.in_progress_started_at = self.streak_start
                         self.state.in_progress_last_seen = now
-                        # throttle disk writes to ~1Hz; the live UI doesn't need them faster
                         if now - self.last_save > 1.0:
                             store.save(self.state)
                             self.last_save = now
@@ -88,6 +96,7 @@ class Tracker:
                 time.sleep(SAMPLE_MS / 1000)
         finally:
             cam.close()
+            vision.close()
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -101,6 +110,9 @@ class Tracker:
                 "now": now,
                 "frame": self.latest_frame,
                 "box": self.latest_box,
+                "keypoints": dict(self.latest_keypoints),
+                "face_detected": self.face_detected,
+                "pose_detected": self.pose_detected,
             }
 
 
@@ -117,12 +129,25 @@ def render(tracker: Tracker) -> Group:
     sub = Text()
     sub.append("status: ", style="dim")
     sub.append(status_text, style=status_color)
+    sig_bits = []
+    if s["face_detected"]:
+        sig_bits.append("[bright_green]face[/]")
+    if s["pose_detected"]:
+        sig_bits.append("[bright_cyan]pose[/]")
+    if sig_bits:
+        sub.append("  ·  via ", style="dim")
+        sub.append(Text.from_markup(" + ".join(sig_bits)))
     if not s["present"]:
         gone = int(s["now"] - s["last_present"])
         sub.append(f"  ·  away {gone}s / grace {int(GRACE_SECONDS)}s", style="dim")
 
     if s["frame"] is not None:
-        thumb = render_frame(s["frame"], width=THUMB_WIDTH, face_box=s["box"])
+        thumb = render_frame(
+            s["frame"],
+            width=THUMB_WIDTH,
+            face_box=s["box"],
+            keypoints=s["keypoints"],
+        )
         thumb_panel = Panel(thumb, title="webcam (10fps)", border_style="green" if s["present"] else "yellow", padding=(0, 0))
         from rich.columns import Columns
         header = Columns([
