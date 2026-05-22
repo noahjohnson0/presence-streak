@@ -21,7 +21,7 @@ First run will prompt macOS for camera access.
 python -m presence_streak
 ```
 
-First launch shows an arrow-key picker listing every webcam attached (named via `system_profiler` on macOS). Your choice is saved to `~/.presence_streak/config.json`. Run with `--pick` to repick later.
+Every launch shows an arrow-key picker listing every webcam attached (named via `system_profiler` on macOS). Pass `--keep` (or `-k`) to skip the prompt and reuse your last choice, or `--camera=N` to pick by index. Saved to `~/.presence_streak/config.json`.
 
 Press `Ctrl+C` to quit. Your current streak is saved on exit so a quick quit doesn't kill it.
 

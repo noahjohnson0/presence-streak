@@ -168,8 +168,16 @@ def render(tracker: Tracker) -> Group:
 
 def main() -> int:
     console = Console()
-    force_pick = "--pick" in sys.argv or "-p" in sys.argv
-    cam_index = choose_camera(force=force_pick)
+    args = sys.argv[1:]
+    keep = "--keep" in args or "-k" in args
+    explicit: int | None = None
+    for a in args:
+        if a.startswith("--camera="):
+            explicit = int(a.split("=", 1)[1])
+    if explicit is not None:
+        cam_index = explicit
+    else:
+        cam_index = choose_camera(force=not keep)
     if cam_index is None:
         console.print("[red]no camera selected[/red]")
         return 1
