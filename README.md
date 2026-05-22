@@ -34,6 +34,7 @@ Press `q` to quit. Your current streak is saved on exit so a quick quit doesn't 
 
 Env vars:
 
-- `PRESENCE_GRACE_SECONDS` — how long you can be missing before the streak breaks (default 30)
+- `PRESENCE_GRACE_SECONDS` — how long you can be missing before the streak breaks (default 10)
 - `PRESENCE_SAMPLE_MS` — sample interval (default 500)
 - `PRESENCE_MIN_CONF` — face detector confidence threshold (default 0.6)
+- `PRESENCE_CAMERA_INDEX` — webcam index (default 1; set to 0 for Continuity Camera on macOS)

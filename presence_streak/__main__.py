@@ -18,9 +18,10 @@ from . import store
 from .detector import Camera, FaceDetector
 from .format import fmt_compact, fmt_duration
 
-GRACE_SECONDS = float(os.environ.get("PRESENCE_GRACE_SECONDS", "30"))
+GRACE_SECONDS = float(os.environ.get("PRESENCE_GRACE_SECONDS", "10"))
 SAMPLE_MS = int(os.environ.get("PRESENCE_SAMPLE_MS", "500"))
 MIN_CONF = float(os.environ.get("PRESENCE_MIN_CONF", "0.6"))
+CAMERA_INDEX = int(os.environ.get("PRESENCE_CAMERA_INDEX", "1"))
 
 
 class Tracker:
@@ -42,7 +43,7 @@ class Tracker:
 
     def detector_loop(self) -> None:
         try:
-            cam = Camera()
+            cam = Camera(CAMERA_INDEX)
             det = FaceDetector(min_confidence=MIN_CONF)
         except Exception as e:
             self.running = False
