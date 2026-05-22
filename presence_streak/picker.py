@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import json
 import queue
-import re
-import subprocess
 import sys
 import termios
 import threading
@@ -18,32 +16,22 @@ import numpy as np
 CONFIG_PATH = Path.home() / ".presence_streak" / "config.json"
 
 
-def _macos_camera_names() -> list[str]:
-    try:
-        out = subprocess.check_output(
-            ["system_profiler", "SPCameraDataType"], text=True, timeout=4
-        )
-    except Exception:
-        return []
-    names: list[str] = []
-    for line in out.splitlines():
-        m = re.match(r"^    ([^ ].+?):\s*$", line)
-        if m and m.group(1) != "Camera":
-            names.append(m.group(1))
-    return names
-
-
 def list_cameras(max_index: int = 4) -> list[tuple[int, str]]:
-    """Return [(opencv_index, human_name), ...] for cameras that actually open."""
-    names = _macos_camera_names() if sys.platform == "darwin" else []
+    """Return [(opencv_index, label), ...] for cameras that actually open.
+
+    Labels are generic ("Camera N — WxH") because OpenCV's AVFoundation
+    index order on macOS does NOT match system_profiler or ffmpeg's
+    device list — there's no reliable way to map index to name without
+    opening it. The live preview is the source of truth.
+    """
     found: list[tuple[int, str]] = []
     for i in range(max_index):
         cap = cv2.VideoCapture(i)
         if cap.isOpened():
-            ok, _ = cap.read()
-            if ok:
-                name = names[len(found)] if len(found) < len(names) else f"Camera {i}"
-                found.append((i, name))
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                h, w = frame.shape[:2]
+                found.append((i, f"Camera {i}  ·  {w}×{h}"))
         cap.release()
     return found
 
