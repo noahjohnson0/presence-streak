@@ -102,14 +102,16 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
     current_open = -1
     last_frame: np.ndarray | None = None
     warmup_until = 0.0
+    pending_open_at = 0.0  # debounce repeated arrow presses
 
     def open_sel() -> None:
         nonlocal cap, current_open, warmup_until, last_frame
         if cap is not None:
             cap.release()
+            cap = None
         cap = cv2.VideoCapture(cameras[sel][0])
         current_open = sel
-        warmup_until = time.time() + 0.6  # let auto-exposure settle
+        warmup_until = time.time() + 0.6
         last_frame = None
 
     fd = sys.stdin.fileno()
@@ -118,45 +120,62 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
     sys.stdout.flush()
     try:
         tty.setraw(fd)
-        open_sel()
+        pending_open_at = time.time()
+        last_render = 0.0
         while True:
-            if cap is not None:
+            now = time.time()
+
+            # debounced open: only actually open after keys settle
+            if pending_open_at and now >= pending_open_at and current_open != sel:
+                open_sel()
+                pending_open_at = 0.0
+
+            if cap is not None and current_open == sel:
                 ok, frame = cap.read()
                 if ok and frame is not None:
                     last_frame = frame
 
-            # render
-            sys.stdout.write("\x1b[H\x1b[J")
-            sys.stdout.write(
-                "pick a camera (↑/↓, enter to confirm, q or ctrl+c to quit)\r\n"
-                "live preview below — the highlighted camera is streaming\r\n\r\n"
-            )
-            for i, (idx, name) in enumerate(cameras):
-                marker = "▶" if i == sel else " "
-                style = "\x1b[1;32m" if i == sel else "\x1b[0m"
-                sys.stdout.write(f"  {style}{marker} [{idx}] {name}\x1b[0m\r\n")
-            sys.stdout.write("\r\n")
-            if last_frame is not None and time.time() >= warmup_until:
-                for line in _frame_to_ansi(last_frame, width=48).split("\n"):
-                    sys.stdout.write(line + "\r\n")
-            else:
-                sys.stdout.write("\x1b[2m  warming up camera…\x1b[0m\r\n")
-            sys.stdout.flush()
+            # render at ~15fps
+            if now - last_render > 0.066:
+                sys.stdout.write("\x1b[H\x1b[J")
+                sys.stdout.write(
+                    "pick a camera (↑/↓, enter to confirm, q or ctrl+c to quit)\r\n"
+                    "live preview below — the highlighted camera is streaming\r\n\r\n"
+                )
+                for i, (idx, name) in enumerate(cameras):
+                    marker = "▶" if i == sel else " "
+                    style = "\x1b[1;32m" if i == sel else "\x1b[0m"
+                    sys.stdout.write(f"  {style}{marker} [{idx}] {name}\x1b[0m\r\n")
+                sys.stdout.write("\r\n")
+                if current_open != sel or pending_open_at:
+                    sys.stdout.write("\x1b[2m  switching camera…\x1b[0m\r\n")
+                elif last_frame is not None and now >= warmup_until:
+                    for line in _frame_to_ansi(last_frame, width=48).split("\n"):
+                        sys.stdout.write(line + "\r\n")
+                else:
+                    sys.stdout.write("\x1b[2m  warming up camera…\x1b[0m\r\n")
+                sys.stdout.flush()
+                last_render = now
 
-            key = _read_available_key()
-            if key is None:
-                time.sleep(0.05)
-                continue
-            if key in ("\x1b[A", "k"):
-                sel = (sel - 1) % len(cameras)
-                open_sel()
-            elif key in ("\x1b[B", "j"):
-                sel = (sel + 1) % len(cameras)
-                open_sel()
-            elif key in ("\r", "\n"):
-                return cameras[sel][0]
-            elif key in ("q", "\x03"):
-                return None
+            # drain all queued keys this tick
+            handled = False
+            while True:
+                key = _read_available_key()
+                if key is None:
+                    break
+                handled = True
+                if key in ("\x1b[A", "k"):
+                    sel = (sel - 1) % len(cameras)
+                    pending_open_at = time.time() + 0.12
+                elif key in ("\x1b[B", "j"):
+                    sel = (sel + 1) % len(cameras)
+                    pending_open_at = time.time() + 0.12
+                elif key in ("\r", "\n"):
+                    return cameras[sel][0]
+                elif key in ("q", "\x03"):
+                    return None
+            if not handled:
+                time.sleep(0.01)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
         if cap is not None:
