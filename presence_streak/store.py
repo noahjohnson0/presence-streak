@@ -20,17 +20,28 @@ class Streak:
 
 
 @dataclass
+class ActivityEvent:
+    """Marks the start of a period spent in a given activity class. The period
+    runs until the next event (or until in_progress_last_seen, for the open
+    tail)."""
+    ts: float
+    activity: str
+
+
+@dataclass
 class State:
     streaks: list[Streak] = field(default_factory=list)
     # if non-zero, a streak was in progress when the app last exited
     in_progress_started_at: float = 0.0
     in_progress_last_seen: float = 0.0
+    activity_events: list[ActivityEvent] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
             "streaks": [asdict(s) for s in self.streaks],
             "in_progress_started_at": self.in_progress_started_at,
             "in_progress_last_seen": self.in_progress_last_seen,
+            "activity_events": [asdict(e) for e in self.activity_events],
         }
 
     @classmethod
@@ -39,7 +50,15 @@ class State:
             streaks=[Streak(**s) for s in d.get("streaks", [])],
             in_progress_started_at=d.get("in_progress_started_at", 0.0),
             in_progress_last_seen=d.get("in_progress_last_seen", 0.0),
+            activity_events=[ActivityEvent(**e) for e in d.get("activity_events", [])],
         )
+
+    def append_activity(self, ts: float, activity: str) -> None:
+        """Append only if the activity is different from the most recent event,
+        which collapses runs of the same class into a single time interval."""
+        if self.activity_events and self.activity_events[-1].activity == activity:
+            return
+        self.activity_events.append(ActivityEvent(ts=ts, activity=activity))
 
 
 def load() -> State:
