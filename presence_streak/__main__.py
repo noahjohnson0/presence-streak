@@ -17,17 +17,18 @@ from rich.text import Text
 from . import store
 from .detector import Camera, FaceDetector
 from .format import fmt_compact, fmt_duration
+from .picker import choose_camera
 from .thumbnail import render_frame
 
 GRACE_SECONDS = float(os.environ.get("PRESENCE_GRACE_SECONDS", "10"))
 SAMPLE_MS = int(os.environ.get("PRESENCE_SAMPLE_MS", "100"))  # 10fps capture+detect
 MIN_CONF = float(os.environ.get("PRESENCE_MIN_CONF", "0.6"))
-CAMERA_INDEX = int(os.environ.get("PRESENCE_CAMERA_INDEX", "1"))
 THUMB_WIDTH = int(os.environ.get("PRESENCE_THUMB_WIDTH", "56"))
 
 
 class Tracker:
-    def __init__(self) -> None:
+    def __init__(self, camera_index: int) -> None:
+        self.camera_index = camera_index
         self.state = store.load()
         self.streak_start = store.resume_or_new(self.state, GRACE_SECONDS)
         self.last_present = time.time()
@@ -48,7 +49,7 @@ class Tracker:
 
     def detector_loop(self) -> None:
         try:
-            cam = Camera(CAMERA_INDEX)
+            cam = Camera(self.camera_index)
             det = FaceDetector(min_confidence=MIN_CONF)
         except Exception as e:
             self.running = False
@@ -167,7 +168,12 @@ def render(tracker: Tracker) -> Group:
 
 def main() -> int:
     console = Console()
-    tracker = Tracker()
+    force_pick = "--pick" in sys.argv or "-p" in sys.argv
+    cam_index = choose_camera(force=force_pick)
+    if cam_index is None:
+        console.print("[red]no camera selected[/red]")
+        return 1
+    tracker = Tracker(cam_index)
 
     def handle_sigint(_sig, _frm):
         tracker.running = False

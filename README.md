@@ -21,7 +21,9 @@ First run will prompt macOS for camera access.
 python -m presence_streak
 ```
 
-Press `q` to quit. Your current streak is saved on exit so a quick quit doesn't kill it.
+First launch shows an arrow-key picker listing every webcam attached (named via `system_profiler` on macOS). Your choice is saved to `~/.presence_streak/config.json`. Run with `--pick` to repick later.
+
+Press `Ctrl+C` to quit. Your current streak is saved on exit so a quick quit doesn't kill it.
 
 ## How it works
 
@@ -37,6 +39,5 @@ Env vars:
 - `PRESENCE_GRACE_SECONDS` — how long you can be missing before the streak breaks (default 10)
 - `PRESENCE_SAMPLE_MS` — sample interval (default 500)
 - `PRESENCE_MIN_CONF` — face detector confidence threshold (default 0.6)
-- `PRESENCE_CAMERA_INDEX` — webcam index (default 1; set to 0 for Continuity Camera on macOS)
 - `PRESENCE_THUMB_WIDTH` — terminal thumbnail width in chars (default 56)
 - `PRESENCE_SAMPLE_MS` — capture/detect interval (default 100 = ~10fps)
