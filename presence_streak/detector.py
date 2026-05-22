@@ -30,7 +30,8 @@ class FaceDetector:
         self.net = cv2.dnn.readNetFromCaffe(str(proto), str(weights))
         self.min_confidence = min_confidence
 
-    def has_face(self, frame: np.ndarray) -> bool:
+    def detect(self, frame: np.ndarray) -> tuple[bool, tuple[int, int, int, int] | None]:
+        """Return (has_face, best_box_xyxy_in_frame_coords)."""
         h, w = frame.shape[:2]
         blob = cv2.dnn.blobFromImage(
             cv2.resize(frame, (300, 300)),
@@ -40,10 +41,21 @@ class FaceDetector:
         )
         self.net.setInput(blob)
         detections = self.net.forward()
+        best_conf = 0.0
+        best_box: tuple[int, int, int, int] | None = None
         for i in range(detections.shape[2]):
-            if float(detections[0, 0, i, 2]) >= self.min_confidence:
-                return True
-        return False
+            conf = float(detections[0, 0, i, 2])
+            if conf >= self.min_confidence and conf > best_conf:
+                best_conf = conf
+                x1 = int(detections[0, 0, i, 3] * w)
+                y1 = int(detections[0, 0, i, 4] * h)
+                x2 = int(detections[0, 0, i, 5] * w)
+                y2 = int(detections[0, 0, i, 6] * h)
+                best_box = (x1, y1, x2, y2)
+        return (best_box is not None, best_box)
+
+    def has_face(self, frame: np.ndarray) -> bool:
+        return self.detect(frame)[0]
 
 
 class Camera:

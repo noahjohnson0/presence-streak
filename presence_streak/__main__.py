@@ -17,11 +17,13 @@ from rich.text import Text
 from . import store
 from .detector import Camera, FaceDetector
 from .format import fmt_compact, fmt_duration
+from .thumbnail import render_frame
 
 GRACE_SECONDS = float(os.environ.get("PRESENCE_GRACE_SECONDS", "10"))
-SAMPLE_MS = int(os.environ.get("PRESENCE_SAMPLE_MS", "500"))
+SAMPLE_MS = int(os.environ.get("PRESENCE_SAMPLE_MS", "100"))  # 10fps capture+detect
 MIN_CONF = float(os.environ.get("PRESENCE_MIN_CONF", "0.6"))
 CAMERA_INDEX = int(os.environ.get("PRESENCE_CAMERA_INDEX", "1"))
+THUMB_WIDTH = int(os.environ.get("PRESENCE_THUMB_WIDTH", "56"))
 
 
 class Tracker:
@@ -32,6 +34,9 @@ class Tracker:
         self.present = True
         self.running = True
         self._lock = threading.Lock()
+        self.latest_frame = None
+        self.latest_box: tuple[int, int, int, int] | None = None
+        self.last_save = 0.0
 
     def end_streak(self, end_time: float) -> None:
         if end_time - self.streak_start < 1.0:
@@ -54,17 +59,24 @@ class Tracker:
             while self.running:
                 frame = cam.read()
                 now = time.time()
-                if frame is not None and det.has_face(frame):
-                    with self._lock:
+                has_face, box = (False, None)
+                if frame is not None:
+                    has_face, box = det.detect(frame)
+                with self._lock:
+                    self.latest_frame = frame
+                    self.latest_box = box
+                    if has_face:
                         if not self.streak_start:
                             self.streak_start = now
                         self.last_present = now
                         self.present = True
                         self.state.in_progress_started_at = self.streak_start
                         self.state.in_progress_last_seen = now
-                        store.save(self.state)
-                else:
-                    with self._lock:
+                        # throttle disk writes to ~1Hz; the live UI doesn't need them faster
+                        if now - self.last_save > 1.0:
+                            store.save(self.state)
+                            self.last_save = now
+                    else:
                         self.present = False
                         if (
                             self.streak_start
@@ -86,6 +98,8 @@ class Tracker:
                 "last_present": self.last_present,
                 "streaks": list(self.state.streaks),
                 "now": now,
+                "frame": self.latest_frame,
+                "box": self.latest_box,
             }
 
 
@@ -106,7 +120,16 @@ def render(tracker: Tracker) -> Group:
         gone = int(s["now"] - s["last_present"])
         sub.append(f"  ·  away {gone}s / grace {int(GRACE_SECONDS)}s", style="dim")
 
-    header = Panel(Group(big, sub), title="presence-streak", border_style="blue")
+    if s["frame"] is not None:
+        thumb = render_frame(s["frame"], width=THUMB_WIDTH, face_box=s["box"])
+        thumb_panel = Panel(thumb, title="webcam (10fps)", border_style="green" if s["present"] else "yellow", padding=(0, 0))
+        from rich.columns import Columns
+        header = Columns([
+            Panel(Group(big, sub), title="presence-streak", border_style="blue"),
+            thumb_panel,
+        ], expand=True)
+    else:
+        header = Panel(Group(big, sub), title="presence-streak", border_style="blue")
 
     table = Table(title="leaderboard — longest streaks", expand=True, header_style="bold")
     table.add_column("#", justify="right", style="dim", width=4)
@@ -155,10 +178,10 @@ def main() -> int:
     t.start()
 
     try:
-        with Live(render(tracker), console=console, refresh_per_second=20, screen=False) as live:
+        with Live(render(tracker), console=console, refresh_per_second=10, screen=False) as live:
             while tracker.running:
                 live.update(render(tracker))
-                time.sleep(0.05)
+                time.sleep(0.1)
     finally:
         tracker.running = False
         t.join(timeout=2)

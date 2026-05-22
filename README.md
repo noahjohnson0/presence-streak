@@ -38,3 +38,5 @@ Env vars:
 - `PRESENCE_SAMPLE_MS` — sample interval (default 500)
 - `PRESENCE_MIN_CONF` — face detector confidence threshold (default 0.6)
 - `PRESENCE_CAMERA_INDEX` — webcam index (default 1; set to 0 for Continuity Camera on macOS)
+- `PRESENCE_THUMB_WIDTH` — terminal thumbnail width in chars (default 56)
+- `PRESENCE_SAMPLE_MS` — capture/detect interval (default 100 = ~10fps)
