@@ -76,18 +76,19 @@ def _read_available_key() -> str | None:
     ch = sys.stdin.read(1)
     if ch != "\x1b":
         return ch
-    # could be a bare ESC or a CSI sequence — peek with a short timeout
-    r2, _, _ = select.select([sys.stdin], [], [], 0.02)
-    if not r2:
-        return ch
-    ch2 = sys.stdin.read(1)
-    if ch2 != "[":
-        return ch + ch2
-    r3, _, _ = select.select([sys.stdin], [], [], 0.02)
-    if not r3:
-        return ch + ch2
-    ch3 = sys.stdin.read(1)
-    return ch + ch2 + ch3
+    # ESC may be a bare press or the start of a CSI sequence (arrow keys etc.).
+    # Give the rest of the sequence a generous 150ms to arrive — terminals can
+    # split the bytes across reads if the kernel buffer flushes mid-sequence.
+    buf = ch
+    deadline = time.time() + 0.15
+    while time.time() < deadline:
+        r2, _, _ = select.select([sys.stdin], [], [], max(0.0, deadline - time.time()))
+        if not r2:
+            break
+        buf += sys.stdin.read(1)
+        if len(buf) >= 3:
+            break
+    return buf
 
 
 def pick(cameras: list[tuple[int, str]]) -> int | None:
@@ -127,7 +128,7 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
             # render
             sys.stdout.write("\x1b[H\x1b[J")
             sys.stdout.write(
-                "pick a camera (↑/↓, enter to confirm, q to quit)\r\n"
+                "pick a camera (↑/↓, enter to confirm, q or ctrl+c to quit)\r\n"
                 "live preview below — the highlighted camera is streaming\r\n\r\n"
             )
             for i, (idx, name) in enumerate(cameras):
@@ -154,7 +155,7 @@ def pick(cameras: list[tuple[int, str]]) -> int | None:
                 open_sel()
             elif key in ("\r", "\n"):
                 return cameras[sel][0]
-            elif key in ("q", "\x03", "\x1b"):
+            elif key in ("q", "\x03"):
                 return None
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
