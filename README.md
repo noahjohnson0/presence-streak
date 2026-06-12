@@ -1,11 +1,14 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
-    <img src="docs/assets/logo-light.png" alt="presence-streak" width="200">
-  </picture>
-</p>
-
-# presence-streak
+<table border="0" cellspacing="0" cellpadding="0">
+<tr>
+<td width="220" valign="middle">
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/assets/logo-dark.png">
+<img src="docs/assets/logo-light.png" alt="presence-streak" width="200">
+</picture>
+</td>
+<td valign="middle"><h1>P&nbsp;R&nbsp;E&nbsp;S&nbsp;E&nbsp;N&nbsp;C&nbsp;E &nbsp; S&nbsp;T&nbsp;R&nbsp;E&nbsp;A&nbsp;K</h1></td>
+</tr>
+</table>
 
 Terminal app that tracks how long you spend in front of your computer in unbroken streaks.
 
