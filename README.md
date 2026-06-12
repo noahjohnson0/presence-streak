@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/logo.png" alt="presence-streak" width="200">
+</p>
+
 # presence-streak
 
 Terminal app that tracks how long you spend in front of your computer in unbroken streaks.
